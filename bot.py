@@ -4,7 +4,8 @@ import os  # <-- Імпортуємо os для роботи з 'секрета�
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters.command import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.fsm.storage.memory import MemoryStorage  # <-- Додано для обробки історії
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
 
 # Імпортуємо нашу функцію з файлу
 from file_reader import read_message
@@ -32,23 +33,21 @@ BTN_RETURN = read_message('btn_return')
 BTN_SITE = read_message('btn_site')
 
 # --- Константи та налаштування ---
+# Тепер всі ключі читаються з 'секретів'
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')  # <-- Нове: читаємо ключ OpenAI
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+ASSISTANT_ID = os.environ.get('ASSISTANT_ID')  # <-- ОНОВЛЕНО
 
-# Промпт для вашого "знавця ВТФК"
-VTFK_SYSTEM_PROMPT = """
-Ти - корисний ШІ-асистент, 'Знавець ВТФК'. 
-Ти спілкуєшся зі студентом Вінницького технічного фахового коледжу (ВТФК).
-Відповідай на питання, пов'язані з навчанням, програмуванням, комп'ютерними дисциплінами. 
-Будь привітним, але професійним. 
-Якщо питання не стосується навчання або коледжу, ввічливо нагадай, що твоя спеціалізація - допомога студентам ВТФК.
-Відповідай українською мовою.
-"""
-
-# Перевірка токена бота
+# --- Перевірка ключів ---
 if not BOT_TOKEN:
     logging.critical("ПОМИЛКА: Не знайдено BOT_TOKEN. Переконайтесь, що ви додали його в Secrets.")
     exit()
+
+if not OPENAI_API_KEY:
+    logging.warning("ПОПЕРЕДЖЕННЯ: Не знайдено OPENAI_API_KEY. Функції ШІ будуть вимкнені.")
+
+if not ASSISTANT_ID:
+    logging.warning("ПОПЕРЕДЖЕННЯ: Не знайдено ASSISTANT_ID. Функції ШІ будуть вимкнені.")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,12 +59,12 @@ logging.basicConfig(
 dp = Dispatcher(storage=MemoryStorage())
 bot = Bot(token=BOT_TOKEN)
 
-# Ініціалізація OpenAI клієнта (тільки якщо є ключ)
-if OPENAI_API_KEY and AsyncOpenAI:
-    logging.info("Ключ OpenAI знайдено. Активую режим ШІ-асистента.")
+# Ініціалізація OpenAI клієнта (тільки якщо всі ключі є)
+if OPENAI_API_KEY and AsyncOpenAI and ASSISTANT_ID:
+    logging.info(f"Ключ OpenAI та Assistant ID ({ASSISTANT_ID[:4]}...) знайдено. Активую режим ШІ-асистента.")
     openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 else:
-    logging.warning("Ключ OPENAI_API_KEY не знайдено. Бот працюватиме в базовому режимі (лише кнопки).")
+    logging.warning("Один або декілька ключів OpenAI відсутні. Бот працюватиме в базовому режимі (лише кнопки).")
     openai_client = None
 
 # --- Клавіатури (без змін) ---
@@ -100,34 +99,66 @@ async def handle_return_button(message: types.Message):
 async def handle_site_button(message: types.Message):
     await message.answer(MSG_SITE_URL)
 
-# --- Новий обробник для ChatGPT ---
-async def handle_chat(message: types.Message, state: types.Message):
-    # Цей обробник спрацює, тільки якщо openai_client ініціалізовано
+# --- Обробник для ChatGPT (Assistants API) ---
+async def handle_chat(message: types.Message, state: FSMContext):
     if not openai_client:
-        # Можна нічого не відповідати, або:
         await message.answer("Вибачте, функція чату зараз недоступна.")
         return
 
-    # Показуємо "друкує..."
     await bot.send_chat_action(message.chat.id, action="typing")
-
+    
     try:
-        # (Проста версія без історії)
-        # Ми просто відправляємо системний промпт + нове повідомлення
-        completion = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",  # Використовуємо нову, швидку та дешеву модель
-            messages=[
-                {"role": "system", "content": VTFK_SYSTEM_PROMPT},
-                {"role": "user", "content": message.text}
-            ],
-            temperature=0.7
+        user_data = await state.get_data()
+        thread_id = user_data.get('thread_id')
+
+        if not thread_id:
+            thread = await openai_client.beta.threads.create()
+            thread_id = thread.id
+            await state.update_data(thread_id=thread_id)
+            logging.info(f"Створено новий тред {thread_id} для користувача {message.from_user.id}")
+
+        await openai_client.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=message.text
         )
-        response_text = completion.choices[0].message.content
-        await message.answer(response_text)
+
+        run = await openai_client.beta.threads.runs.create(
+            thread_id=thread_id,
+            assistant_id=ASSISTANT_ID  # <-- Використовуємо змінну
+        )
+
+        status = run.status
+        while status in ['queued', 'in_progress']:
+            await asyncio.sleep(0.5)
+            run = await openai_client.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run.id
+            )
+            status = run.status
+
+        if status == 'completed':
+            messages = await openai_client.beta.threads.messages.list(
+                thread_id=thread_id,
+                limit=1,
+                order='desc'
+            )
+            
+            response = messages.data[0]
+            if response.role == 'assistant' and response.content[0].type == 'text':
+                response_text = response.content[0].text.value
+                await message.answer(response_text)
+            else:
+                logging.error("Отримано не-текстову або не-асистент відповідь")
+                await message.answer("Вибачте, сталася дивна помилка при отриманні відповіді.")
+
+        else:
+            logging.error(f"Run {run.id} завершився зі статусом {status}. Деталі: {run.last_error}")
+            await message.answer(f"Вибачте, сталася помилка під час обробки. Статус: {status}")
 
     except Exception as e:
-        logging.error(f"Помилка при запиті до OpenAI: {e}")
-        await message.answer("Вибачте, сталася помилка при обробці вашого запиту. Спробуйте пізніше.")
+        logging.error(f"Критична помилка в handle_chat: {e}")
+        await message.answer("Вибачте, сталася непередбачувана помилка. Спробуйте пізніше.")
 
 # --- Реєстрація обробників ---
 def register_handlers():
