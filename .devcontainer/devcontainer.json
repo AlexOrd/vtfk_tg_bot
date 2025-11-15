@@ -1,9 +1,10 @@
 {
-    "name": "Python 3 Bot",
-    "image": "mcr.microsoft.com/devcontainers/python:3.10",
+    "name": "Python 3 Telegram Bot",
+    "image": "mcr.microsoft.com/devcontainers/python:3.13",
     "features": {
         "ghcr.io/devcontainers/features/git:1": {}
     },
+
     // Ця команда виконається ПІСЛЯ створення контейнера
     "postCreateCommand": "pip install -r requirements.txt",
 
@@ -13,7 +14,16 @@
             "extensions": [
                 "ms-python.python",
                 "ms-python.vscode-pylance"
-            ]
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python"
+            }
         }
-    }
+    },
+
+    // Змінні середовища будуть взяті з Codespaces Secrets
+    // Додайте BOT_TOKEN, OPENAI_API_KEY, ASSISTANT_ID у налаштуваннях Codespace
+
+    // Відкривати порти не потрібно для Telegram бота (він не слухає порти)
+    "forwardPorts": []
 }

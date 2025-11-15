@@ -7,6 +7,10 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 
+# Завантаження змінних середовища з .env файлу
+from dotenv import load_dotenv
+load_dotenv()
+
 # Імпортуємо нашу функцію з файлу
 from file_reader import read_message
 
@@ -106,7 +110,7 @@ async def handle_chat(message: types.Message, state: FSMContext):
         return
 
     await bot.send_chat_action(message.chat.id, action="typing")
-    
+
     try:
         user_data = await state.get_data()
         thread_id = user_data.get('thread_id')
@@ -143,7 +147,7 @@ async def handle_chat(message: types.Message, state: FSMContext):
                 limit=1,
                 order='desc'
             )
-            
+
             response = messages.data[0]
             if response.role == 'assistant' and response.content[0].type == 'text':
                 response_text = response.content[0].text.value
