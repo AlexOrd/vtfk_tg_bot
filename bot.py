@@ -85,23 +85,23 @@ main_keyboard = ReplyKeyboardMarkup(
 # --- Обробники команд (без змін) ---
 @dp.message(Command("start"))
 async def handle_start(message: types.Message):
-    await message.answer(MSG_START, reply_markup=main_keyboard)
+    await message.answer(MSG_START, reply_markup=main_keyboard, parse_mode='HTML')
 
 @dp.message(lambda message: message.text == BTN_HELLO)
 async def handle_hello_button(message: types.Message):
-    await message.answer(MSG_GREETING)
+    await message.answer(MSG_GREETING, parse_mode='HTML')
 
 @dp.message(lambda message: message.text == BTN_ABOUT)
 async def handle_about_button(message: types.Message):
-    await message.answer(MSG_ABOUT)
+    await message.answer(MSG_ABOUT, parse_mode='HTML')
 
 @dp.message(lambda message: message.text == BTN_RETURN)
 async def handle_return_button(message: types.Message):
-    await message.answer(MSG_RETURN)
+    await message.answer(MSG_RETURN, parse_mode='HTML')
 
 @dp.message(lambda message: message.text == BTN_SITE)
 async def handle_site_button(message: types.Message):
-    await message.answer(MSG_SITE_URL)
+    await message.answer(MSG_SITE_URL, parse_mode='HTML')
 
 # --- Обробник для ChatGPT (Assistants API) ---
 async def handle_chat(message: types.Message, state: FSMContext):
